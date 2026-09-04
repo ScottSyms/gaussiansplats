@@ -30,7 +30,9 @@ controls.maxDistance = 100;
 scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
 const params = new URLSearchParams(location.search);
-const loadUrl = params.get('url') || './1713.spz';
+const rawUrl = params.get('url') || './1713.spz';
+// Workers resolve relative URLs against blob: URLs, so we must pass absolute
+const loadUrl = new URL(rawUrl, window.location.href).href;
 
 let splatMesh = null;
 let t0 = 0;
@@ -57,7 +59,10 @@ async function loadSplat(url) {
   try {
     // Use Spark's native URL loader (streaming + WASM in worker)
     // This is faster than manual fetch+Blob and lets Spark handle gzip.
-    splatMesh = new SplatMesh({ url });
+    // Ensure absolute URL for blob-worker fetch (relative fails inside worker)
+    const absoluteUrl = new URL(url, window.location.href).href;
+    console.log('[loadSplat] absoluteUrl', absoluteUrl);
+    splatMesh = new SplatMesh({ url: absoluteUrl });
 
     // Spark doesn't expose fetch progress, so we poll `initialized`
     // Show interim while fetch+decode happens in Spark's worker.

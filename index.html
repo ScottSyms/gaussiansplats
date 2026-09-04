@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>1713 — Gaussian Splat Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a0a; font-family: system-ui, -apple-system, sans-serif; }
+    #canvas { display: block; width: 100%; height: 100%; }
+    #overlay {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; pointer-events: none;
+      color: #fff; background: #0a0a0a; transition: opacity 0.4s;
+    }
+    #overlay.hidden { opacity: 0; }
+    #overlay h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 0.5rem; }
+    #overlay p { font-size: 0.9rem; opacity: 0.7; }
+    #bar-wrap { width: 240px; height: 4px; background: #222; border-radius: 2px; margin-top: 1rem; overflow: hidden; }
+    #bar { height: 100%; width: 0%; background: #fff; transition: width 0.2s; }
+    #hud {
+      position: absolute; top: 12px; left: 12px; color: #fff; font-size: 12px;
+      background: rgba(0,0,0,0.6); padding: 8px 10px; border-radius: 8px; line-height: 1.5;
+      backdrop-filter: blur(6px);
+    }
+    #hud a { color: #8ab4ff; text-decoration: none; }
+    #hud kbd { background: #333; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+        "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/2.1.0/spark.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="overlay">
+    <h1>1713.spz</h1>
+    <p id="status">Fetching 18.1 MB — 832,888 splats (Morton-sorted, SPZ quantized)</p>
+    <div id="bar-wrap"><div id="bar"></div></div>
+    <p style="margin-top:0.75rem; font-size:0.75rem; opacity:0.5">Drag &amp; drop .ply / .spz / .splat to view other files</p>
+  </div>
+  <div id="hud">
+    <div><strong>1713</strong> — 18.1 MB SPZ (from 197 MB PLY)</div>
+    <div>832k splats · SH degree 3 preserved · Morton sorted</div>
+    <div style="margin-top:4px; opacity:0.8">
+      <kbd>drag</kbd> orbit · <kbd>scroll</kbd> zoom · <kbd>right-drag</kbd> pan · <kbd>drop</kbd> file
+    </div>
+    <div style="margin-top:6px"><a href="./1713.spz" download>Download .spz</a> · <a href="https://github.com/nianticlabs/spz" target="_blank">SPZ spec</a></div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

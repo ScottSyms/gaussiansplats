@@ -1,0 +1,10 @@
+# Raw PLYs are >100 MB — keep locally, publish via Releases or LFS-free
+1713.ply
+1713-clean.ply
+*.ply
+
+# Keep SPZ (18 MB) in repo, but ignore other large artifacts
+node_modules/
+dist/
+.DS_Store
+.env

@@ -39,8 +39,8 @@
 <body>
   <canvas id="canvas"></canvas>
   <div id="overlay">
-    <h1>1713.spz</h1>
-    <p id="status">Fetching 18.1 MB — 832,888 splats (Morton-sorted, SPZ quantized)</p>
+    <h1 id="overlay-title">1713-filtered.spz</h1>
+    <p id="status">Fetching 4.5 MB — 179,177 splats (opacity filtered)</p>
     <div id="bar-wrap"><div id="bar"></div></div>
     <p style="margin-top:0.75rem; font-size:0.75rem; opacity:0.5">Drag &amp; drop .ply / .spz / .splat to view other files</p>
   </div>
@@ -49,8 +49,8 @@
     <div style="margin-top:6px">
       <label for="fileSelect" style="font-size:11px;opacity:0.8">Load:</label>
       <select id="fileSelect" style="background:#222;color:#fff;border:1px solid #444;border-radius:4px;padding:2px 4px;font-size:11px">
+        <option value="./1713-filtered.spz" selected>1713-filtered.spz — 4.5 MB / 179k (opacity filtered, cleaner — recommended)</option>
         <option value="./1713.spz">1713.spz — 20.7 MB / 832k (direct, SH3)</option>
-        <option value="./1713-filtered.spz">1713-filtered.spz — 4.5 MB / 179k (opacity filtered, cleaner)</option>
         <option value="./1713-filtered.ply">1713-filtered.ply — 42 MB / 179k (PLY)</option>
         <option value="./1713-sorted.spz">1713-sorted.spz — 18.1 MB / 832k (Morton)</option>
         <option value="https://github.com/ScottSyms/gaussiansplats/releases/download/v1.0/1713.ply">Original PLY — 197 MB (Release)</option>

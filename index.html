@@ -45,12 +45,25 @@
     <p style="margin-top:0.75rem; font-size:0.75rem; opacity:0.5">Drag &amp; drop .ply / .spz / .splat to view other files</p>
   </div>
   <div id="hud">
-    <div><strong>1713</strong> — 18.1 MB SPZ (from 197 MB PLY)</div>
-    <div>832k splats · SH degree 3 preserved · Morton sorted</div>
+    <div><strong>1713</strong> — <span id="hud-file">20.7 MB SPZ (832k)</span></div>
+    <div style="margin-top:6px">
+      <label for="fileSelect" style="font-size:11px;opacity:0.8">Load:</label>
+      <select id="fileSelect" style="background:#222;color:#fff;border:1px solid #444;border-radius:4px;padding:2px 4px;font-size:11px">
+        <option value="./1713.spz">1713.spz — 20.7 MB / 832k (direct, SH3)</option>
+        <option value="./1713-filtered.spz">1713-filtered.spz — 4.5 MB / 179k (opacity filtered, cleaner)</option>
+        <option value="./1713-filtered.ply">1713-filtered.ply — 42 MB / 179k (PLY)</option>
+        <option value="./1713-sorted.spz">1713-sorted.spz — 18.1 MB / 832k (Morton)</option>
+        <option value="https://github.com/ScottSyms/gaussiansplats/releases/download/v1.0/1713.ply">Original PLY — 197 MB (Release)</option>
+      </select>
+    </div>
     <div style="margin-top:4px; opacity:0.8">
       <kbd>drag</kbd> orbit · <kbd>scroll</kbd> zoom · <kbd>right-drag</kbd> pan · <kbd>drop</kbd> file
     </div>
-    <div style="margin-top:6px"><a href="./1713.spz" download>Download .spz</a> · <a href="https://github.com/nianticlabs/spz" target="_blank">SPZ spec</a></div>
+    <div style="margin-top:6px; font-size:11px"><a href="./1713.spz" download>Download .spz</a> · <a href="https://github.com/nianticlabs/spz" target="_blank">SPZ spec</a> · <a href="https://github.com/ScottSyms/gaussiansplats/releases/download/v1.0/1713.ply" target="_blank">Original .ply</a></div>
+    <div style="margin-top:6px; display:flex; gap:6px">
+      <button id="resetView" style="background:#333;color:#fff;border:1px solid #555;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer">Reset view</button>
+      <button id="toggleSH" style="background:#333;color:#fff;border:1px solid #555;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer">SH: on</button>
+    </div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>

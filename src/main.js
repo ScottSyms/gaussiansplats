@@ -37,12 +37,13 @@ const pointerControls = new PointerLockControls(camera, canvas);
 let isWalkMode = false;
 let walkCenter = new THREE.Vector3(0, 0, 0); // updated on load
 let walkSize = 11.7; // bbox diagonal, updated on load
-const keys = { w: false, a: false, s: false, d: false, q: false, e: false, shift: false, space: false };
+const keys = { w: false, a: false, s: false, d: false, q: false, e: false, shift: false, space: false, ArrowLeft: false, ArrowRight: false, ArrowUp: false, ArrowDown: false };
 let walkSpeedBase = 3.0;
 let walkSpeedSprint = 6.0;
 const clock = new THREE.Clock();
 const walkVelocity = new THREE.Vector3(0, 0, 0);
-const walkConfig = { damping: 12.0, mouseSensitivity: 1.0, invertY: false, flyMode: true };
+const walkConfig = { damping: 12.0, mouseSensitivity: 1.0, invertY: false, flyMode: true, turnSpeed: 1.1 }; // ~63°/sec
+let walkYaw = 0, walkPitch = 0; // radians, for arrow/mouse unified
 
 function updateWalkSpeedFromSize(size) {
   walkSize = size;
@@ -59,6 +60,12 @@ function setWalkMode(enabled) {
   if (enabled) {
     controls.enabled = false;
     walkVelocity.set(0, 0, 0);
+    // Init yaw/pitch from current camera for arrow/mouse
+    const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+    walkYaw = e.y;
+    walkPitch = e.x;
+    console.log('[walk] enter walkYaw', (walkYaw*180/Math.PI).toFixed(1), 'walkPitch', (walkPitch*180/Math.PI).toFixed(1));
+    walkMouseIgnore = 3;
     // Use canvas for lock (more reliable than body)
     pointerControls.lock();
     if (btn) btn.textContent = 'Exit walk (Esc)';
@@ -73,11 +80,26 @@ function setWalkMode(enabled) {
     walkVelocity.set(0, 0, 0);
   }
 }
+// Sync walkYaw/walkPitch from mouse when locked
+let walkMouseIgnore = 3;
+document.addEventListener('mousemove', (e) => {
+  if (!isWalkMode || !pointerControls.isLocked) return;
+  if (walkMouseIgnore > 0) { walkMouseIgnore--; return; }
+  if (Math.abs(e.movementX) > 50 || Math.abs(e.movementY) > 50) return;
+  const sens = 0.002 * walkConfig.mouseSensitivity;
+  walkYaw -= e.movementX * sens;
+  walkPitch -= e.movementY * sens * (walkConfig.invertY ? -1 : 1);
+  walkPitch = THREE.MathUtils.clamp(walkPitch, -Math.PI/2 + 0.1, Math.PI/2 - 0.1);
+  const euler = new THREE.Euler(walkPitch, walkYaw, 0, 'YXZ');
+  camera.quaternion.setFromEuler(euler);
+  const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+  controls.target.copy(camera.position).add(dir.multiplyScalar(2));
+});
 pointerControls.addEventListener('lock', () => {
   // Ensure controls are in correct state when locked
   if (isWalkMode) {
     const hint = document.getElementById('walkHint');
-    if (hint) hint.innerHTML = '<div style="font-weight:600; color:#8ab4ff">Walkthrough — mouse to look</div><div><kbd>W/A/S/D</kbd> move · <kbd>Q/E</kbd> up/down · <kbd>Space</kbd> up · <kbd>Shift</kbd> sprint · <kbd>Esc</kbd> exit</div>';
+    if (hint) hint.innerHTML = '<div style="font-weight:600; color:#8ab4ff">Walkthrough — arrows or mouse to look</div><div><kbd>←/→</kbd> turn · <kbd>↑/↓</kbd> look · <kbd>W/S</kbd> forward/back · <kbd>A/D</kbd> strafe · <kbd>Q/E</kbd> up/down · <kbd>Shift</kbd> sprint · <kbd>Esc</kbd> exit</div>';
   }
 });
 pointerControls.addEventListener('unlock', () => {
@@ -101,6 +123,11 @@ pointerControls.addEventListener('unlock', () => {
 });
 window.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
+  // Arrow keys for turning / looking (intuitive, no mouse required)
+  if (e.key === 'ArrowLeft') { keys.ArrowLeft = true; console.log('[keys] ArrowLeft down', isWalkMode); if (isWalkMode) e.preventDefault(); }
+  if (e.key === 'ArrowRight') { keys.ArrowRight = true; console.log('[keys] ArrowRight down', isWalkMode, keys.ArrowRight); if (isWalkMode) e.preventDefault(); }
+  if (e.key === 'ArrowUp') { keys.ArrowUp = true; console.log('[keys] ArrowUp down'); if (isWalkMode) e.preventDefault(); }
+  if (e.key === 'ArrowDown') { keys.ArrowDown = true; if (isWalkMode) e.preventDefault(); }
   // Prevent browser shortcuts when walk mode (e.g., space scroll)
   if (isWalkMode && ['w','a','s','d','q','e',' '].includes(k)) e.preventDefault();
   if (k === 'w') keys.w = true;
@@ -114,6 +141,10 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => {
   const k = e.key.toLowerCase();
+  if (e.key === 'ArrowLeft') keys.ArrowLeft = false;
+  if (e.key === 'ArrowRight') keys.ArrowRight = false;
+  if (e.key === 'ArrowUp') keys.ArrowUp = false;
+  if (e.key === 'ArrowDown') keys.ArrowDown = false;
   if (k === 'w') keys.w = false;
   if (k === 'a') keys.a = false;
   if (k === 's') keys.s = false;
@@ -666,6 +697,25 @@ const walkTargetVelocity = new THREE.Vector3();
 renderer.setAnimationLoop(() => {
   const delta = clock.getDelta();
   if (isWalkMode) {
+    // Arrow keys turn (intuitive, no mouse required) - update yaw/pitch
+    const turn = walkConfig.turnSpeed * delta;
+    let turned = false;
+    const beforeYaw = walkYaw, beforePitch = walkPitch;
+    if (keys.ArrowLeft) { walkYaw += turn; turned = true; }
+    if (keys.ArrowRight) { walkYaw -= turn; turned = true; }
+    if (keys.ArrowUp) { walkPitch += turn; turned = true; }
+    if (keys.ArrowDown) { walkPitch -= turn; turned = true; }
+    if (turned) {
+      walkPitch = THREE.MathUtils.clamp(walkPitch, -Math.PI/2 + 0.1, Math.PI/2 - 0.1);
+      const e = new THREE.Euler(walkPitch, walkYaw, 0, 'YXZ');
+      camera.quaternion.setFromEuler(e);
+      const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+      controls.target.copy(camera.position).add(dir.multiplyScalar(2));
+      if (Math.random() < 0.1) console.log('[walk] turn walkYaw', (walkYaw*180/Math.PI).toFixed(1), 'walkPitch', (walkPitch*180/Math.PI).toFixed(1), 'delta', delta.toFixed(3), 'turn', turn.toFixed(3));
+    }
+    if (turned && Math.abs(walkPitch - beforePitch) > 0.01 && !keys.ArrowUp && !keys.ArrowDown) {
+      console.log('[walk] pitch changed without ArrowUp/Down!', beforePitch.toFixed(3), '->', walkPitch.toFixed(3), 'keys', JSON.stringify(keys));
+    }
     // Allow movement even if not locked (for headless test), but mouse look requires lock
     const moveSpeed = keys.shift ? walkSpeedSprint : walkSpeedBase;
     const forward = new THREE.Vector3();

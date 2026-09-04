@@ -32,13 +32,25 @@ controls.maxDistance = 100;
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
-// --- Walkthrough (PointerLock) ---
-const pointerControls = new PointerLockControls(camera, document.body);
+// --- Walkthrough (PointerLock) --- improved
+const pointerControls = new PointerLockControls(camera, canvas);
 let isWalkMode = false;
 let walkCenter = new THREE.Vector3(0, 0, 0); // updated on load
+let walkSize = 11.7; // bbox diagonal, updated on load
 const keys = { w: false, a: false, s: false, d: false, q: false, e: false, shift: false, space: false };
-const walkSpeed = { base: 3.0, sprint: 6.0 }; // units/sec
+let walkSpeedBase = 3.0;
+let walkSpeedSprint = 6.0;
 const clock = new THREE.Clock();
+const walkVelocity = new THREE.Vector3(0, 0, 0);
+const walkConfig = { damping: 12.0, mouseSensitivity: 1.0, invertY: false, flyMode: true };
+
+function updateWalkSpeedFromSize(size) {
+  walkSize = size;
+  // Scale speeds to scene extent: filtered ~11 => 2.5/5, raw huge 308 but we clamp to 8 dist => use 8
+  const base = Math.max(1.5, Math.min(8, size * 0.22));
+  walkSpeedBase = base;
+  walkSpeedSprint = base * 2.2;
+}
 
 function setWalkMode(enabled) {
   isWalkMode = enabled;
@@ -46,13 +58,11 @@ function setWalkMode(enabled) {
   const hint = document.getElementById('walkHint');
   if (enabled) {
     controls.enabled = false;
+    walkVelocity.set(0, 0, 0);
+    // Use canvas for lock (more reliable than body)
     pointerControls.lock();
     if (btn) btn.textContent = 'Exit walk (Esc)';
     if (hint) hint.style.display = 'block';
-    // Start inside centre at eye height
-    camera.position.copy(walkCenter).add(new THREE.Vector3(0, 0, 1.6 * 0.5)); // slight offset for splat scale
-    // Look slightly down the scene - face +Y (common forward for this capture)
-    // Keep current rotation from pointer lock; ensure not inside floor
     document.body.style.cursor = 'none';
   } else {
     pointerControls.unlock();
@@ -60,8 +70,16 @@ function setWalkMode(enabled) {
     if (btn) btn.textContent = 'Enter walkthrough';
     if (hint) hint.style.display = 'none';
     document.body.style.cursor = '';
+    walkVelocity.set(0, 0, 0);
   }
 }
+pointerControls.addEventListener('lock', () => {
+  // Ensure controls are in correct state when locked
+  if (isWalkMode) {
+    const hint = document.getElementById('walkHint');
+    if (hint) hint.innerHTML = '<div style="font-weight:600; color:#8ab4ff">Walkthrough — mouse to look</div><div><kbd>W/A/S/D</kbd> move · <kbd>Q/E</kbd> up/down · <kbd>Space</kbd> up · <kbd>Shift</kbd> sprint · <kbd>Esc</kbd> exit</div>';
+  }
+});
 pointerControls.addEventListener('unlock', () => {
   if (isWalkMode) {
     // User pressed Esc - exit walk mode but keep camera where it is
@@ -72,25 +90,27 @@ pointerControls.addEventListener('unlock', () => {
     const hint = document.getElementById('walkHint');
     if (hint) hint.style.display = 'none';
     document.body.style.cursor = '';
+    walkVelocity.set(0, 0, 0);
     // Re-target orbit to current position look-at
     const dir = new THREE.Vector3();
     camera.getWorldDirection(dir);
     controls.target.copy(camera.position).add(dir.multiplyScalar(2));
     controls.update();
+    updateCoordHUD(); // immediate
   }
 });
 window.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
-  if (['w','a','s','d','q','e',' '].includes(k) || e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
-    if (k === 'w') keys.w = true;
-    if (k === 'a') keys.a = true;
-    if (k === 's') keys.s = true;
-    if (k === 'd') keys.d = true;
-    if (k === 'q') keys.q = true;
-    if (k === 'e') keys.e = true;
-    if (k === ' ') keys.space = true;
-    if (e.shiftKey) keys.shift = true;
-  }
+  // Prevent browser shortcuts when walk mode (e.g., space scroll)
+  if (isWalkMode && ['w','a','s','d','q','e',' '].includes(k)) e.preventDefault();
+  if (k === 'w') keys.w = true;
+  if (k === 'a') keys.a = true;
+  if (k === 's') keys.s = true;
+  if (k === 'd') keys.d = true;
+  if (k === 'q') keys.q = true;
+  if (k === 'e') keys.e = true;
+  if (k === ' ') keys.space = true;
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.key === 'Shift') keys.shift = true;
 });
 window.addEventListener('keyup', (e) => {
   const k = e.key.toLowerCase();
@@ -101,11 +121,14 @@ window.addEventListener('keyup', (e) => {
   if (k === 'q') keys.q = false;
   if (k === 'e') keys.e = false;
   if (k === ' ') keys.space = false;
-  if (!e.shiftKey) keys.shift = false;
-  if (e.key === 'Shift') keys.shift = false;
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.key === 'Shift') keys.shift = false;
 });
-// Click on canvas in walk mode re-locks
+// Click on canvas in walk mode re-locks (also allow clicking overlay hint)
 canvas.addEventListener('click', () => {
+  if (isWalkMode && !pointerControls.isLocked) pointerControls.lock();
+});
+const walkHintEl = document.getElementById('walkHint');
+if (walkHintEl) walkHintEl.addEventListener('click', () => {
   if (isWalkMode && !pointerControls.isLocked) pointerControls.lock();
 });
 
@@ -113,9 +136,218 @@ const params = new URLSearchParams(location.search);
 const rawUrl = params.get('url') || document.getElementById('fileSelect')?.value || './1713.spz';
 const loadUrl = new URL(rawUrl, window.location.href).href;
 
+// --- Pose helpers (URL + UI) ---
+function parseVec3(str) {
+  if (!str) return null;
+  const parts = str.split(',').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return null;
+  return new THREE.Vector3(parts[0], parts[1], parts[2]);
+}
+function parseQuat(str) {
+  if (!str) return null;
+  const p = str.split(',').map(Number);
+  if (p.length !== 4 || p.some(isNaN)) return null;
+  return new THREE.Quaternion(p[0], p[1], p[2], p[3]);
+}
+function parseEulerDeg(str) {
+  if (!str) return null;
+  const p = str.split(',').map(Number);
+  if (p.length < 2 || p.some(isNaN)) return null;
+  // yaw (Y), pitch (X), roll (Z) degrees
+  return { yaw: p[0]||0, pitch: p[1]||0, roll: p[2]||0 };
+}
+function getInitialPose() {
+  console.log('[getInitialPose] params', window.location.search, 'pos raw', params.get('pos'), 'yaw raw', params.get('yaw'));
+  // Supports: pos, camPos, camYaw/pitch/roll, quat, camQuat, splatPos, splatQuat etc.
+  const pos = parseVec3(params.get('pos') || params.get('camPos') || params.get('cameraPos'));
+  console.log('[getInitialPose] parsed pos', pos?.toArray());
+  const quat = parseQuat(params.get('quat') || params.get('camQuat'));
+  const euler = parseEulerDeg(params.get('rot') || params.get('camRot') || params.get('yaw') && `${params.get('yaw')},${params.get('pitch')||0},${params.get('roll')||0}`);
+  // Also support separate x,y,z,yaw,pitch,roll params
+  const px = params.get('x')||params.get('posX'), py=params.get('y')||params.get('posY'), pz=params.get('z')||params.get('posZ');
+  let pos2 = pos;
+  if (!pos2 && px!==null && py!==null && pz!==null) {
+    const v = [Number(px), Number(py), Number(pz)];
+    if (!v.some(isNaN)) pos2 = new THREE.Vector3(v[0],v[1],v[2]);
+  }
+  const yaw = params.get('yaw')!==null ? Number(params.get('yaw')) : (euler?euler.yaw:null);
+  const pitch = params.get('pitch')!==null ? Number(params.get('pitch')) : (euler?euler.pitch:null);
+  const roll = params.get('roll')!==null ? Number(params.get('roll')) : (euler?euler.roll:null);
+  let yawPitchRoll = null;
+  if (yaw!==null && !isNaN(yaw)) yawPitchRoll = { yaw, pitch: pitch||0, roll: roll||0 };
+  else if (euler) yawPitchRoll = euler;
+  // Splat pose
+  const splatPos = parseVec3(params.get('splatPos') || params.get('splat_pos'));
+  const splatQuat = parseQuat(params.get('splatQuat') || params.get('splat_quat'));
+  const splatEuler = parseEulerDeg(params.get('splatRot') || params.get('splat_rot'));
+  const splatScaleStr = params.get('splatScale') || params.get('splat_scale');
+  let splatScale = null;
+  if (splatScaleStr) {
+    const p = splatScaleStr.split(',').map(Number);
+    if (p.length===1 && !isNaN(p[0])) splatScale = new THREE.Vector3(p[0],p[0],p[0]);
+    else if (p.length===3 && !p.some(isNaN)) splatScale = new THREE.Vector3(p[0],p[1],p[2]);
+  }
+  return { pos: pos2, quat, yawPitchRoll, splatPos, splatQuat, splatEuler, splatScale };
+}
+let pendingInitialPose = getInitialPose();
+
+function applySplatPose() {
+  if (!splatMesh) return;
+  const { splatPos, splatQuat, splatEuler, splatScale } = pendingInitialPose;
+  // Also check UI inputs if no URL pose
+  let pos = splatPos;
+  let quat = splatQuat;
+  let eul = splatEuler;
+  let scale = splatScale;
+  // UI overrides if fields filled
+  const sx = document.getElementById('splatX'), sy=document.getElementById('splatY'), sz=document.getElementById('splatZ');
+  const sqx=document.getElementById('splatQx'), sqy=document.getElementById('splatQy'), sqz=document.getElementById('splatQz'), sqw=document.getElementById('splatQw');
+  const ssx=document.getElementById('splatSx'), ssy=document.getElementById('splatSy'), ssz=document.getElementById('splatSz');
+  if (sx && sy && sz && sx.value && sy.value && sz.value) {
+    const v=[Number(sx.value), Number(sy.value), Number(sz.value)];
+    if (!v.some(isNaN)) pos = new THREE.Vector3(v[0],v[1],v[2]);
+  }
+  if (sqx && sqy && sqz && sqw && sqx.value) {
+    const q=[Number(sqx.value), Number(sqy.value), Number(sqz.value), Number(sqw.value)];
+    if (!q.some(isNaN)) quat = new THREE.Quaternion(q[0],q[1],q[2],q[3]);
+  }
+  if (!quat && eul) {
+    const e = new THREE.Euler(THREE.MathUtils.degToRad(eul.pitch||0), THREE.MathUtils.degToRad(eul.yaw||0), THREE.MathUtils.degToRad(eul.roll||0), 'YXZ');
+    quat = new THREE.Quaternion().setFromEuler(e);
+  }
+  if (ssx && ssy && ssz && ssx.value) {
+    const s=[Number(ssx.value), Number(ssy.value), Number(ssz.value)];
+    if (!s.some(isNaN)) scale = new THREE.Vector3(s[0],s[1],s[2]);
+  }
+  if (pos) splatMesh.position.copy(pos);
+  if (quat) splatMesh.quaternion.copy(quat);
+  if (scale) splatMesh.scale.copy(scale);
+  splatMesh.updateMatrixWorld(true);
+}
+function applyCameraPoseFromParams() {
+  console.log('[applyCameraPose] pending', pendingInitialPose.pos?.toArray(), pendingInitialPose.yawPitchRoll, 'quat', pendingInitialPose.quat?.toArray());
+  const { pos, quat, yawPitchRoll } = pendingInitialPose;
+  // Also check UI camera inputs - only if URL didn't provide pos, and UI has explicit values
+  const cx=document.getElementById('camX'), cy=document.getElementById('camY'), cz=document.getElementById('camZ');
+  const cyaw=document.getElementById('camYaw'), cpitch=document.getElementById('camPitch'), croll=document.getElementById('camRoll');
+  console.log('[applyCameraPose] UI cam inputs', cx?.value, cy?.value, cz?.value, 'yaw', cyaw?.value);
+  let p = pos;
+  if (cx && cy && cz && cx.value!=='' && cy.value!=='' && cz.value!=='') {
+    const v=[Number(cx.value), Number(cy.value), Number(cz.value)];
+    if (!v.some(isNaN)) p = new THREE.Vector3(v[0],v[1],v[2]);
+  }
+  let q = quat;
+  // Only use UI yaw/pitch if URL didn't provide quat and UI has explicit values
+  let yawVal = null, pitchVal = null, rollVal = null;
+  if (!q) {
+    // Prefer URL yaw/pitch/roll
+    if (yawPitchRoll) {
+      yawVal = yawPitchRoll.yaw;
+      pitchVal = yawPitchRoll.pitch;
+      rollVal = yawPitchRoll.roll;
+    }
+    // Only fall back to UI if URL didn't provide
+    if (yawVal===null && cyaw && cyaw.value!=='' ) yawVal = Number(cyaw.value);
+    if (pitchVal===null && cpitch && cpitch.value!=='' ) pitchVal = Number(cpitch.value);
+    if (rollVal===null && croll && croll.value!=='' ) rollVal = Number(croll.value);
+  }
+  console.log('[applyCameraPose] yaw/pitch/roll vals', yawVal, pitchVal, rollVal, 'q before', q?.toArray());
+  if (!q && yawVal!==null && !isNaN(yawVal)) {
+    const e = new THREE.Euler(THREE.MathUtils.degToRad(pitchVal||0), THREE.MathUtils.degToRad(yawVal), THREE.MathUtils.degToRad(rollVal||0), 'YXZ');
+    q = new THREE.Quaternion().setFromEuler(e);
+    console.log('[applyCameraPose] quat from yaw/pitch', q.toArray());
+  }
+  // Only use UI pos if URL didn't provide pos
+  if (!p && cx && cy && cz && cx.value!=='' && cy.value!=='' && cz.value!=='') {
+    const v=[Number(cx.value), Number(cy.value), Number(cz.value)];
+    if (!v.some(isNaN)) p = new THREE.Vector3(v[0],v[1],v[2]);
+  }
+  console.log('[applyCameraPose] final p', p?.toArray(), 'q', q?.toArray());
+  if (p) {
+    camera.position.copy(p);
+    // If we have rotation, apply it; otherwise look at walkCenter
+    if (q) {
+      camera.quaternion.copy(q);
+      // Sync controls target to look direction
+      const dir = new THREE.Vector3(0,0,-1).applyQuaternion(q);
+      controls.target.copy(p).add(dir.multiplyScalar(2));
+    } else {
+      camera.lookAt(walkCenter);
+    }
+    controls.update();
+    console.log('[applyCameraPose] applied p, cam now', camera.position.toArray(), 'target', controls.target.toArray());
+    return true;
+  } else if (q) {
+    camera.quaternion.copy(q);
+    const dir = new THREE.Vector3(0,0,-1).applyQuaternion(q);
+    controls.target.copy(camera.position).add(dir.multiplyScalar(2));
+    controls.update();
+    console.log('[applyCameraPose] applied q only, cam', camera.position.toArray());
+    return true;
+  }
+  console.log('[applyCameraPose] nothing to apply, return false');
+  return false;
+}
+function buildPoseURL() {
+  const p = camera.position;
+  const q = camera.quaternion;
+  // Derive yaw/pitch from quaternion for URL friendliness
+  const e = new THREE.Euler().setFromQuaternion(q, 'YXZ');
+  const yaw = THREE.MathUtils.radToDeg(e.y).toFixed(2);
+  const pitch = THREE.MathUtils.radToDeg(e.x).toFixed(2);
+  const roll = THREE.MathUtils.radToDeg(e.z).toFixed(2);
+  const u = new URL(window.location.href);
+  u.searchParams.set('pos', `${p.x.toFixed(3)},${p.y.toFixed(3)},${p.z.toFixed(3)}`);
+  u.searchParams.set('yaw', yaw);
+  u.searchParams.set('pitch', pitch);
+  if (Math.abs(Number(roll))>0.1) u.searchParams.set('roll', roll);
+  else u.searchParams.delete('roll');
+  // Splat pose if non-default
+  if (splatMesh) {
+    const sp = splatMesh.position;
+    if (sp.length() > 0.001) u.searchParams.set('splatPos', `${sp.x.toFixed(3)},${sp.y.toFixed(3)},${sp.z.toFixed(3)}`);
+    const sq = splatMesh.quaternion;
+    if (Math.abs(sq.x)>0.001 || Math.abs(sq.y)>0.001 || Math.abs(sq.z)>0.001 || Math.abs(sq.w-1)>0.001) {
+      u.searchParams.set('splatQuat', `${sq.x.toFixed(4)},${sq.y.toFixed(4)},${sq.z.toFixed(4)},${sq.w.toFixed(4)}`);
+    }
+    const sc = splatMesh.scale;
+    if (Math.abs(sc.x-1)>0.001 || Math.abs(sc.y-1)>0.001 || Math.abs(sc.z-1)>0.001) {
+      u.searchParams.set('splatScale', `${sc.x.toFixed(3)},${sc.y.toFixed(3)},${sc.z.toFixed(3)}`);
+    }
+  }
+  return u.toString();
+}
+
+// --- Live coordinate HUD ---
+function formatVec3(v) { return `${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)}`; }
+function formatQuat(q) { return `${q.x.toFixed(3)}, ${q.y.toFixed(3)}, ${q.z.toFixed(3)}, ${q.w.toFixed(3)}`; }
+let lastHudUpdate = 0;
+function updateCoordHUD() {
+  const now = performance.now();
+  if (now - lastHudUpdate < 100) return; // 10Hz throttle
+  lastHudUpdate = now;
+  const camPosEl = document.getElementById('camPos');
+  const camRotEl = document.getElementById('camRot');
+  const camQuatEl = document.getElementById('camQuat');
+  const splatPosEl = document.getElementById('splatPosHud');
+  const splatRotEl = document.getElementById('splatRotHud');
+  if (camPosEl) camPosEl.textContent = formatVec3(camera.position);
+  if (camRotEl || camQuatEl) {
+    const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+    const yaw = THREE.MathUtils.radToDeg(e.y).toFixed(1);
+    const pitch = THREE.MathUtils.radToDeg(e.x).toFixed(1);
+    const roll = THREE.MathUtils.radToDeg(e.z).toFixed(1);
+    if (camRotEl) camRotEl.textContent = `yaw ${yaw}° pitch ${pitch}° roll ${roll}°`;
+    if (camQuatEl) camQuatEl.textContent = `q ${formatQuat(camera.quaternion)}`;
+  }
+  if (splatPosEl && splatMesh) splatPosEl.textContent = formatVec3(splatMesh.position);
+  if (splatRotEl && splatMesh) splatRotEl.textContent = `q ${formatQuat(splatMesh.quaternion)}`;
+}
+
 let splatMesh = null;
 let t0 = 0;
 let currentSH = 3;
+let poseApplied = false;
 
 // UI bindings
 const fileSelect = document.getElementById('fileSelect');
@@ -192,6 +424,87 @@ if (shBtn) shBtn.addEventListener('click', () => {
   }
 });
 
+// --- Pose panel wiring ---
+const poseToggle = document.getElementById('poseToggle');
+const poseBody = document.getElementById('poseBody');
+if (poseToggle && poseBody) {
+  poseToggle.addEventListener('click', () => {
+    const hidden = poseBody.style.display === 'none';
+    poseBody.style.display = hidden ? 'block' : 'none';
+    poseToggle.textContent = hidden ? '− hide' : '+ show';
+  });
+}
+const applyCamBtn = document.getElementById('applyCamPose');
+if (applyCamBtn) applyCamBtn.addEventListener('click', () => {
+  // Build a temporary pending pose from UI then apply
+  const cx=Number(document.getElementById('camX').value), cy=Number(document.getElementById('camY').value), cz=Number(document.getElementById('camZ').value);
+  const yaw=Number(document.getElementById('camYaw').value), pitch=Number(document.getElementById('camPitch').value), roll=Number(document.getElementById('camRoll').value);
+  if (![cx,cy,cz].some(isNaN)) {
+    camera.position.set(cx,cy,cz);
+    const e = new THREE.Euler(THREE.MathUtils.degToRad(pitch||0), THREE.MathUtils.degToRad(yaw||0), THREE.MathUtils.degToRad(roll||0), 'YXZ');
+    camera.quaternion.setFromEuler(e);
+    const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+    controls.target.copy(camera.position).add(dir.multiplyScalar(2));
+    controls.update();
+    // Persist to URL
+    history.replaceState(null, '', buildPoseURL());
+    updateCoordHUD();
+  }
+});
+const setFromCurrentBtn = document.getElementById('setFromCurrentCam');
+if (setFromCurrentBtn) setFromCurrentBtn.addEventListener('click', () => {
+  const p = camera.position;
+  const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+  document.getElementById('camX').value = p.x.toFixed(2);
+  document.getElementById('camY').value = p.y.toFixed(2);
+  document.getElementById('camZ').value = p.z.toFixed(2);
+  document.getElementById('camYaw').value = THREE.MathUtils.radToDeg(e.y).toFixed(1);
+  document.getElementById('camPitch').value = THREE.MathUtils.radToDeg(e.x).toFixed(1);
+  document.getElementById('camRoll').value = THREE.MathUtils.radToDeg(e.z).toFixed(1);
+});
+const applySplatBtn = document.getElementById('applySplatPose');
+if (applySplatBtn) applySplatBtn.addEventListener('click', () => {
+  applySplatPose();
+  history.replaceState(null, '', buildPoseURL());
+  updateCoordHUD();
+});
+const resetSplatBtn = document.getElementById('resetSplatPose');
+if (resetSplatBtn) resetSplatBtn.addEventListener('click', () => {
+  if (!splatMesh) return;
+  splatMesh.position.set(0,0,0);
+  splatMesh.quaternion.identity();
+  splatMesh.scale.set(1,1,1);
+  splatMesh.updateMatrixWorld(true);
+  ['splatX','splatY','splatZ','splatQx','splatQy','splatQz','splatQw','splatSx','splatSy','splatSz'].forEach(id=>{
+    const el=document.getElementById(id);
+    if (el) el.value='';
+  });
+  history.replaceState(null, '', buildPoseURL());
+  updateCoordHUD();
+});
+const copyPoseLinkBtn = document.getElementById('copyPoseLink');
+if (copyPoseLinkBtn) copyPoseLinkBtn.addEventListener('click', async () => {
+  const url = buildPoseURL();
+  try { await navigator.clipboard.writeText(url); copyPoseLinkBtn.textContent='Copied!'; setTimeout(()=>copyPoseLinkBtn.textContent='Copy share link',1500); } catch { prompt('Copy link:', url); }
+  history.replaceState(null, '', url);
+});
+const updateUrlBtn = document.getElementById('updateUrlPose');
+if (updateUrlBtn) updateUrlBtn.addEventListener('click', () => {
+  history.replaceState(null, '', buildPoseURL());
+  updateUrlBtn.textContent='Updated!'; setTimeout(()=>updateUrlBtn.textContent='Update URL',1500);
+});
+const copyPoseBtn = document.getElementById('copyPose');
+if (copyPoseBtn) copyPoseBtn.addEventListener('click', async () => {
+  const url = buildPoseURL();
+  try { await navigator.clipboard.writeText(url); copyPoseBtn.textContent='Copied!'; setTimeout(()=>copyPoseBtn.textContent='Copy link',1500);} catch { prompt('Copy link:', url); }
+});
+const copyCoordsBtn = document.getElementById('copyCoords');
+if (copyCoordsBtn) copyCoordsBtn.addEventListener('click', async () => {
+  const p=camera.position, e=new THREE.Euler().setFromQuaternion(camera.quaternion,'YXZ');
+  const txt=`pos ${p.x.toFixed(3)},${p.y.toFixed(3)},${p.z.toFixed(3)} yaw ${THREE.MathUtils.radToDeg(e.y).toFixed(2)} pitch ${THREE.MathUtils.radToDeg(e.x).toFixed(2)} roll ${THREE.MathUtils.radToDeg(e.z).toFixed(2)} quat ${formatQuat(camera.quaternion)}`;
+  try { await navigator.clipboard.writeText(txt); copyCoordsBtn.textContent='Copied!'; setTimeout(()=>copyCoordsBtn.textContent='Copy coords',1500);} catch { prompt('Coords:', txt); }
+});
+
 function setProgress(pct, text) {
   bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
   if (text) status.textContent = text;
@@ -202,7 +515,7 @@ async function loadSplat(url) {
   const absoluteUrl = new URL(url, window.location.href).href;
   t0 = performance.now();
   setProgress(5, `Fetching ${absoluteUrl} …`);
-  console.log('[loadSplat] fetch', absoluteUrl);
+  console.log('[loadSplat] fetch', absoluteUrl, 'pendingInitialPose', pendingInitialPose);
   if (splatMesh) {
     try { scene.remove(splatMesh); splatMesh.dispose?.(); } catch {}
     splatMesh = null;
@@ -272,13 +585,19 @@ async function loadSplat(url) {
         }
         // Store true scene centre for walkthrough (inside view)
         walkCenter.copy(target);
+        updateWalkSpeedFromSize(size);
         const walkStart = target.clone().add(new THREE.Vector3(0, 0.3, 1.2));
         window._walkStart = walkStart.clone();
         window._walkCenter = target.clone();
+        // Apply splat pose first (so bbox already accounted, but allow user offset)
+        applySplatPose();
         // --- Starting view: INSIDE centre (as requested) ---
         // Default orbit now starts inside at eye height looking forward
-        controls.target.copy(target.clone().add(new THREE.Vector3(0, 1.5, 0)));
-        camera.position.copy(walkStart);
+        let poseOverridden = applyCameraPoseFromParams();
+        if (!poseOverridden) {
+          controls.target.copy(target.clone().add(new THREE.Vector3(0, 1.5, 0)));
+          camera.position.copy(walkStart);
+        }
         // Keep outside overview available via Reset button
         window._orbitOutside = { target: target.clone(), dist };
         camera.near = Math.max(0.01, dist/50);
@@ -343,34 +662,44 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+const walkTargetVelocity = new THREE.Vector3();
 renderer.setAnimationLoop(() => {
   const delta = clock.getDelta();
-  if (isWalkMode && pointerControls.isLocked) {
-    const speed = (keys.shift ? walkSpeed.sprint : walkSpeed.base) * delta;
-    // Move relative to camera orientation
+  if (isWalkMode) {
+    // Allow movement even if not locked (for headless test), but mouse look requires lock
+    const moveSpeed = keys.shift ? walkSpeedSprint : walkSpeedBase;
     const forward = new THREE.Vector3();
-    camera.getWorldDirection(forward);
-    forward.z = 0; // keep walk mostly horizontal; remove if you want fly
-    // Actually allow full 3D: don't zero z for splats (they are volumetric)
-    // Recompute with full direction for fly-through
     camera.getWorldDirection(forward);
     forward.normalize();
     const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
-    const up = new THREE.Vector3(0, 0, 1); // world up
-    if (keys.w) camera.position.addScaledVector(forward, speed);
-    if (keys.s) camera.position.addScaledVector(forward, -speed);
-    if (keys.a) camera.position.addScaledVector(right, -speed);
-    if (keys.d) camera.position.addScaledVector(right, speed);
-    if (keys.q || keys.e) {
-      const vert = keys.e ? 1 : -1;
-      if (keys.q || keys.e) camera.position.addScaledVector(up, vert * speed);
+    const up = new THREE.Vector3(0, 0, 1);
+    walkTargetVelocity.set(0,0,0);
+    if (keys.w) walkTargetVelocity.addScaledVector(forward, moveSpeed);
+    if (keys.s) walkTargetVelocity.addScaledVector(forward, -moveSpeed);
+    if (keys.a) walkTargetVelocity.addScaledVector(right, -moveSpeed);
+    if (keys.d) walkTargetVelocity.addScaledVector(right, moveSpeed);
+    if (keys.q) walkTargetVelocity.addScaledVector(up, -moveSpeed);
+    if (keys.e) walkTargetVelocity.addScaledVector(up, moveSpeed);
+    if (keys.space) walkTargetVelocity.addScaledVector(up, moveSpeed);
+    // Smooth damping
+    walkVelocity.lerp(walkTargetVelocity, Math.min(1, walkConfig.damping * delta));
+    if (walkTargetVelocity.lengthSq() > 0 || walkVelocity.lengthSq() > 0.001) {
+      camera.position.addScaledVector(walkVelocity, delta);
+      // Update orbit target to keep controls in sync when exiting walk
+      // Don't update controls.target while in walk, just keep camera
     }
-    if (keys.space) camera.position.addScaledVector(up, speed);
-    // Clamp to reasonable scene bounds to avoid flying infinitely
-    // No clamp - free fly
-  } else {
+    updateCoordHUD();
+  }
+  if (!isWalkMode) {
+    // Damp velocity when not walking
+    walkVelocity.lerp(new THREE.Vector3(0,0,0), Math.min(1, walkConfig.damping * delta));
+    controls.update();
+  } else if (!pointerControls.isLocked) {
+    // Still update controls damping when walk but not locked (so orbit doesn't jump)
     controls.update();
   }
+  // Live HUD (throttled inside)
+  updateCoordHUD();
   renderer.render(scene, camera);
 });
 

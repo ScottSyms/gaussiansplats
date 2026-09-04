@@ -25,6 +25,21 @@
     }
     #hud a { color: #8ab4ff; text-decoration: none; }
     #hud kbd { background: #333; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+    #coordHud {
+      position: absolute; top: 12px; right: 12px; color: #fff; font-size: 11px;
+      background: rgba(0,0,0,0.6); padding: 8px 10px; border-radius: 8px; line-height: 1.5;
+      backdrop-filter: blur(6px); font-family: ui-monospace, monospace; min-width: 220px;
+    }
+    #coordHud b { color: #8ab4ff; }
+    #posePanel {
+      position: absolute; bottom: 12px; left: 12px; color: #fff; font-size: 11px;
+      background: rgba(0,0,0,0.7); padding: 10px; border-radius: 8px; line-height: 1.4;
+      backdrop-filter: blur(6px); max-width: 360px;
+    }
+    #posePanel input { background:#222; color:#fff; border:1px solid #444; border-radius:3px; padding:2px 4px; width: 60px; font-family: monospace; font-size: 10px; }
+    #posePanel label { opacity:0.8; font-size:10px; }
+    #posePanel button { background:#333; color:#fff; border:1px solid #555; border-radius:3px; padding:3px 6px; font-size:10px; cursor:pointer; }
+    #posePanel button.primary { background:#4a7cff; border-color:#6a9cff; }
   </style>
   <script type="importmap">
     {
@@ -72,6 +87,71 @@
       <div style="opacity:0.7">Starting inside centre at eye height (1.2m). Look around with mouse.</div>
     </div>
   </div>
+  <div id="coordHud">
+    <div style="font-weight:600; color:#8ab4ff; margin-bottom:4px">Live Coordinates</div>
+    <div>Cam: <b id="camPos">0, 0, 0</b></div>
+    <div>Rot: <b id="camRot">yaw 0° pitch 0° roll 0°</b> <span style="opacity:0.6" id="camQuat">q 0,0,0,1</span></div>
+    <div>Splat: <b id="splatPosHud">0, 0, 0</b> <span style="opacity:0.6" id="splatRotHud">q 0,0,0,1</span></div>
+    <div style="margin-top:6px; display:flex; gap:4px">
+      <button id="copyPose" style="background:#333;color:#fff;border:1px solid #555;border-radius:3px;padding:2px 6px;font-size:10px;cursor:pointer">Copy link</button>
+      <button id="copyCoords" style="background:#222;color:#ccc;border:1px solid #444;border-radius:3px;padding:2px 6px;font-size:10px;cursor:pointer">Copy coords</button>
+    </div>
+  </div>
+
+  <div id="posePanel">
+    <div style="font-weight:600; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center">
+      <span>Starting Pose</span>
+      <button id="poseToggle" style="background:none;border:none;color:#8ab4ff;cursor:pointer;font-size:10px">− hide</button>
+    </div>
+    <div id="poseBody">
+      <div style="margin-bottom:6px">
+        <div style="font-weight:600; color:#8ab4ff; font-size:10px">Camera</div>
+        <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap; margin-top:2px">
+          <label>X<input id="camX" type="number" step="0.1" placeholder="x"></label>
+          <label>Y<input id="camY" type="number" step="0.1" placeholder="y"></label>
+          <label>Z<input id="camZ" type="number" step="0.1" placeholder="z"></label>
+        </div>
+        <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap; margin-top:4px">
+          <label>Yaw<input id="camYaw" type="number" step="1" placeholder="yaw°"></label>
+          <label>Pitch<input id="camPitch" type="number" step="1" placeholder="pitch°"></label>
+          <label>Roll<input id="camRoll" type="number" step="1" placeholder="roll°"></label>
+        </div>
+        <div style="display:flex; gap:4px; margin-top:4px">
+          <button id="applyCamPose" class="primary">Apply cam</button>
+          <button id="setFromCurrentCam">Set from current</button>
+        </div>
+      </div>
+      <div style="margin-bottom:6px; border-top:1px solid #333; padding-top:6px">
+        <div style="font-weight:600; color:#8ab4ff; font-size:10px">Splat</div>
+        <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap; margin-top:2px">
+          <label>X<input id="splatX" type="number" step="0.1" placeholder="x"></label>
+          <label>Y<input id="splatY" type="number" step="0.1" placeholder="y"></label>
+          <label>Z<input id="splatZ" type="number" step="0.1" placeholder="z"></label>
+        </div>
+        <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap; margin-top:4px">
+          <label>Qx<input id="splatQx" type="number" step="0.01" placeholder="x"></label>
+          <label>Qy<input id="splatQy" type="number" step="0.01" placeholder="y"></label>
+          <label>Qz<input id="splatQz" type="number" step="0.01" placeholder="z"></label>
+          <label>Qw<input id="splatQw" type="number" step="0.01" placeholder="w"></label>
+        </div>
+        <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap; margin-top:4px">
+          <label>Sx<input id="splatSx" type="number" step="0.1" placeholder="sx"></label>
+          <label>Sy<input id="splatSy" type="number" step="0.1" placeholder="sy"></label>
+          <label>Sz<input id="splatSz" type="number" step="0.1" placeholder="sz"></label>
+        </div>
+        <div style="display:flex; gap:4px; margin-top:4px">
+          <button id="applySplatPose" class="primary">Apply splat</button>
+          <button id="resetSplatPose">Reset splat</button>
+        </div>
+      </div>
+      <div style="display:flex; gap:4px; margin-top:6px">
+        <button id="copyPoseLink" class="primary" style="flex:1">Copy share link</button>
+        <button id="updateUrlPose" style="flex:1">Update URL</button>
+      </div>
+      <div style="font-size:9px; opacity:0.6; margin-top:4px">URL params: ?pos=x,y,z&yaw=&pitch=&roll=&quat=&splatPos=&splatQuat=&splatScale= · Share link preserves poses.</div>
+    </div>
+  </div>
+
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

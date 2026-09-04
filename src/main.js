@@ -31,7 +31,6 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
 const params = new URLSearchParams(location.search);
 const rawUrl = params.get('url') || './1713.spz';
-// Workers resolve relative URLs against blob: URLs, so we must pass absolute
 const loadUrl = new URL(rawUrl, window.location.href).href;
 
 let splatMesh = null;
@@ -40,14 +39,14 @@ let t0 = 0;
 function setProgress(pct, text) {
   bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
   if (text) status.textContent = text;
-  // force paint for long decodes
   if (pct < 100) bar.getBoundingClientRect();
 }
 
 async function loadSplat(url) {
+  const absoluteUrl = new URL(url, window.location.href).href;
   t0 = performance.now();
-  setProgress(5, `Fetching ${url} — 18.1 MB …`);
-  console.log('[loadSplat] fetch', url);
+  setProgress(5, `Fetching ${absoluteUrl} …`);
+  console.log('[loadSplat] fetch', absoluteUrl);
   if (splatMesh) {
     try { scene.remove(splatMesh); splatMesh.dispose?.(); } catch {}
     splatMesh = null;
@@ -57,58 +56,36 @@ async function loadSplat(url) {
   bar.style.background = '#fff';
 
   try {
-    // Use Spark's native URL loader (streaming + WASM in worker)
-    // This is faster than manual fetch+Blob and lets Spark handle gzip.
-    // Ensure absolute URL for blob-worker fetch (relative fails inside worker)
-    const absoluteUrl = new URL(url, window.location.href).href;
-    console.log('[loadSplat] absoluteUrl', absoluteUrl);
-    splatMesh = new SplatMesh({ url: absoluteUrl });
+    const res = await fetch(absoluteUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${absoluteUrl}`);
+    const len = parseInt(res.headers.get('content-length') || '0', 10);
+    console.log('[loadSplat] content-length', len, 'status', res.status);
 
-    // Spark doesn't expose fetch progress, so we poll `initialized`
-    // Show interim while fetch+decode happens in Spark's worker.
-    let dot = 0;
-    const iv = setInterval(() => {
-      dot = (dot + 1) % 4;
-      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-      if (!splatMesh.isInitialized) {
-        setProgress(10 + Math.min(85, elapsed * 6), `Downloading + decoding${'.'.repeat(dot)} ${elapsed}s`);
-      }
-    }, 300);
-
-    // Also hook started fetch via explicit HEAD to show download progress
-    // Fire-and-forget progress via fetch for UX, but actual data comes from SplatMesh url
-    // We keep a parallel fetch just for progress bar — abort once SplatMesh inits
-    const controller = new AbortController();
-    fetch(url, { signal: controller.signal }).then(async (res) => {
-      if (!res.ok || !res.body) return;
-      const len = parseInt(res.headers.get('content-length') || '0', 10);
-      const reader = res.body.getReader();
-      let received = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        received += value.length;
-        if (splatMesh.isInitialized) { controller.abort(); break; }
+    // Use TransformStream for progress while piping to Spark
+    let received = 0;
+    const progressStream = res.body.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        received += chunk.length;
         if (len) {
-          const pct = 10 + Math.round((received / len) * 70);
+          const pct = 5 + Math.round((received / len) * 65);
           setProgress(pct, `Downloading ${(received/1024/1024).toFixed(1)} / ${(len/1024/1024).toFixed(1)} MB`);
         } else {
-          setProgress(10 + Math.min(70, received / (18.1*1024*1024) * 70), `Downloading ${(received/1024/1024).toFixed(1)} MB…`);
+          setProgress(5 + Math.min(65, received / (20.7*1024*1024) * 65), `Downloading ${(received/1024/1024).toFixed(1)} MB…`);
         }
+        controller.enqueue(chunk);
       }
-    }).catch(()=>{});
+    }));
 
-    scene.add(splatMesh);
     const dtFetchStart = performance.now();
+    splatMesh = new SplatMesh({ stream: progressStream, streamLength: len || undefined });
+    scene.add(splatMesh);
     await splatMesh.initialized;
-    clearInterval(iv);
-    controller.abort();
     const dt = ((performance.now() - t0)/1000).toFixed(1);
     const dtDecode = ((performance.now() - dtFetchStart)/1000).toFixed(1);
-    console.log(`[loadSplat] initialized ${splatMesh.numSplats} splats in ${dt}s (decode ${dtDecode}s)`, splatMesh);
+    console.log(`[loadSplat] stream initialized ${splatMesh.numSplats} splats in ${dt}s (decode ${dtDecode}s)`, splatMesh);
+    if (!splatMesh.numSplats) throw new Error('Decoded 0 splats — file may be corrupt or unsupported');
 
-    setProgress(98, `Finalizing — ${splatMesh.numSplats?.toLocaleString() || '832,888'} splats`);
-    // Auto-frame
+    setProgress(98, `Finalizing — ${splatMesh.numSplats.toLocaleString()} splats`);
     try {
       const box = splatMesh.getBoundingBox?.(false) || splatMesh.getBoundingBox?.(true);
       if (box && !box.isEmpty()) {
@@ -116,26 +93,22 @@ async function loadSplat(url) {
         const size = box.getSize(new THREE.Vector3()).length();
         console.log('[loadSplat] bbox center', center, 'size', size);
         controls.target.copy(center);
-        // Place camera so splat roughly fills view
         const dist = Math.max(4, size * 0.9);
         camera.position.set(center.x, center.y - dist * 0.25, center.z + dist);
         camera.near = Math.max(0.01, size / 1000);
         camera.far = size * 10;
         camera.updateProjectionMatrix();
         controls.update();
-      } else {
-        console.warn('[loadSplat] no bbox, using default camera');
       }
     } catch (e) { console.warn('bbox failed', e); }
 
-    setProgress(100, `${splatMesh.numSplats?.toLocaleString() || ''} splats — ${dt}s`);
+    setProgress(100, `${splatMesh.numSplats.toLocaleString()} splats — ${dt}s`);
     setTimeout(() => { overlay.classList.add('hidden'); overlay.style.pointerEvents = 'none'; }, 700);
   } catch (e) {
     console.error('[loadSplat] failed', e);
     setProgress(100, `Failed: ${e.message} — check console`);
     bar.style.background = '#ff5555';
-    // Fallback hint for GitHub Pages MIME / CORS
-    status.innerHTML = `Failed: ${e.message}<br><span style="opacity:0.7;font-size:11px">Try <a href="${url}" target="_blank" style="color:#8ab4ff">direct link</a> or <code>?url=&lt;url&gt;</code>. Look in DevTools Console.</span>`;
+    status.innerHTML = `Failed: ${e.message}<br><span style="opacity:0.7;font-size:11px">Try <a href="${absoluteUrl}" target="_blank" style="color:#8ab4ff">direct link</a> or <code>?url=&lt;url&gt;</code>. Console has details.</span>`;
     overlay.classList.remove('hidden');
     overlay.style.pointerEvents = 'auto';
   }
@@ -159,7 +132,8 @@ canvas.addEventListener('drop', async e => {
     scene.add(splatMesh);
     await splatMesh.initialized;
     const dt = ((performance.now()-t0)/1000).toFixed(1);
-    setProgress(100, `${file.name} — ${splatMesh.numSplats?.toLocaleString()||''} splats — ${dt}s`);
+    if (!splatMesh.numSplats) throw new Error('Decoded 0 splats');
+    setProgress(100, `${file.name} — ${splatMesh.numSplats.toLocaleString()} splats — ${dt}s`);
     setTimeout(()=> overlay.classList.add('hidden'), 700);
     overlay.style.pointerEvents = 'none';
     history.replaceState(null, '', `?url=${encodeURIComponent(file.name)} (local)`);

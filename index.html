@@ -60,9 +60,16 @@
       <kbd>drag</kbd> orbit · <kbd>scroll</kbd> zoom · <kbd>right-drag</kbd> pan · <kbd>drop</kbd> file
     </div>
     <div style="margin-top:6px; font-size:11px"><a href="./1713.spz" download>Download .spz</a> · <a href="https://github.com/nianticlabs/spz" target="_blank">SPZ spec</a> · <a href="https://github.com/ScottSyms/gaussiansplats/releases/download/v1.0/1713.ply" target="_blank">Original .ply</a></div>
-    <div style="margin-top:6px; display:flex; gap:6px">
-      <button id="resetView" style="background:#333;color:#fff;border:1px solid #555;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer">Reset view</button>
+    <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap">
+      <button id="walkBtn" style="background:#4a7cff;color:#fff;border:1px solid #6a9cff;border-radius:4px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600">Enter walkthrough</button>
+      <button id="resetView" style="background:#333;color:#fff;border:1px solid #555;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer">Reset (outside)</button>
+      <button id="centerView" style="background:#333;color:#fff;border:1px solid #555;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer">Go to centre</button>
       <button id="toggleSH" style="background:#333;color:#fff;border:1px solid #555;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer">SH: on</button>
+    </div>
+    <div id="walkHint" style="margin-top:6px; display:none; font-size:11px; line-height:1.4; background:rgba(74,124,255,0.15); border:1px solid rgba(74,124,255,0.3); border-radius:4px; padding:6px">
+      <div style="font-weight:600; color:#8ab4ff">Walkthrough active — click to lock mouse</div>
+      <div><kbd>W/A/S/D</kbd> move · <kbd>Q/E</kbd> up/down · <kbd>Shift</kbd> sprint · <kbd>Esc</kbd> exit</div>
+      <div style="opacity:0.7">Starting inside centre at eye height (1.2m). Look around with mouse.</div>
     </div>
   </div>
   <script type="module" src="/src/main.js"></script>

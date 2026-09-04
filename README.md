@@ -8,14 +8,14 @@ Static web viewer for `1713.ply` (832,888 splats) hosted on GitHub Pages with st
 |------|------|-------------|---------|
 | `1713.ply` | 197 MB | Original PLY (SH degree 3, 248 B/splat) — source of truth | **No** — publish via GitHub Releases (see below) |
 | `1713-clean.ply` | 187 MB | Morton-sorted, normals `nx/ny/nz` dropped (lossless), intermediate | **No** |
-| `public/1713.spz` | **18.1 MB** | SPZ quantized (Niantic `spz-js 1.2.5`, SH3 preserved, 10.3x) — delivery | **Yes** |
+| `public/1713.spz` | **20.7 MB** | SPZ quantized direct from original (`spz-js 1.2.5`, SH3 preserved, 9.5x) — delivery | **Yes** |
+| `public/1713-sorted.spz` | 18.1 MB | Morton-sorted variant (extra 5% compression, same quality) — `?url=./1713-sorted.spz` | Yes |
 | `index.html` | — | Spark (`@sparkjsdev/spark@2.1.0` + `three@0.180`) viewer | Yes |
 
 ### Optimization applied
 
-* **Sorted**: Morton Z-order (21-bit per axis) — improves GPU cache locality, progressive visual coherence, and compression ratio (~5%).
-* **Dead attributes dropped**: `nx/ny/nz` normals unused by 3DGS — saves 9.5 MB raw before quantization.
 * **Quantized**: SPZ — positions 24-bit, SH 8-bit, quaternion packed, gzip. Near-lossless (typically <1 dB PSNR vs raw). No SH degree reduction, no splat pruning (fidelity kept per request).
+* **Morton-sorted variant** available (`1713-sorted.spz`) — Z-order 21-bit, improves compression to 18.1 MB and streaming locality, but default is direct for maximum compatibility.
 * **Not applied**: SH degree reduction (would lose view-dependent lighting), opacity pruning (would drop splats). Re-run `scripts/convert.js` with options if you need smaller mobile target.
 
 ## Local dev
@@ -39,7 +39,7 @@ node scripts/convert.js           # reads 1713.ply -> public/1713.spz
 # or: npx spz-js helpers, or SuperSplat / GaussForge
 ```
 
-The conversion script does: load PLY stream → `spz-js` `serializeSpz` (SH3) → 18 MB.
+The conversion script does: load PLY stream → `spz-js` `serializeSpz` (SH3) → 20.7 MB (sorted 18.1 MB).
 
 ## Hosting on GitHub
 
